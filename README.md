@@ -1,4 +1,4 @@
-# VectorForge 🚀
+# VectorForge 
 
 VectorForge is a high-performance Vector Database and Retrieval-Augmented Generation (RAG) pipeline built entirely from scratch in C++. 
 
