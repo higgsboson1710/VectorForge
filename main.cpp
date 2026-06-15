@@ -144,3 +144,76 @@ public:
     std::vector<std::pair<float,int>> knn(
         const std::vector<float>& q, int k, DistFn dist)
     {
+        std::priority_queue<std::pair<float,int>> heap;
+        knn(root, q, k, 0, dist, heap);
+        std::vector<std::pair<float,int>> r;
+        while (!heap.empty()) { r.push_back(heap.top()); heap.pop(); }
+        std::sort(r.begin(), r.end());
+        return r;
+    }
+
+    void rebuild(const std::vector<VectorItem>& items) {
+        destroy(root); root = nullptr;
+        for (auto& v : items) insert(v);
+    }
+};
+
+// =====================================================================
+//  HNSW — Hierarchical Navigable Small World
+// =====================================================================
+
+class HNSW {
+    struct Node {
+        VectorItem item;
+        int maxLyr;
+        std::vector<std::vector<int>> nbrs;
+    };
+
+    std::unordered_map<int, Node> G;
+    int    M, M0, ef_build;
+    float  mL;
+    int    topLayer = -1;
+    int    entryPt  = -1;
+    std::mt19937 rng;
+
+    int randLevel() {
+        std::uniform_real_distribution<float> u(0.0f, 1.0f);
+        return (int)std::floor(-std::log(u(rng)) * mL);
+    }
+
+    std::vector<std::pair<float,int>> searchLayer(
+        const std::vector<float>& q, int ep, int ef, int lyr, DistFn dist)
+    {
+        std::unordered_map<int,bool> vis;
+        std::priority_queue<std::pair<float,int>,
+            std::vector<std::pair<float,int>>, std::greater<>> cands;
+        std::priority_queue<std::pair<float,int>> found;
+
+        float d0 = dist(q, G[ep].item.emb);
+        vis[ep] = true;
+        cands.push({d0, ep});
+        found.push({d0, ep});
+
+        while (!cands.empty()) {
+            auto [cd, cid] = cands.top(); cands.pop();
+            if ((int)found.size() >= ef && cd > found.top().first) break;
+            if (lyr >= (int)G[cid].nbrs.size()) continue;
+            for (int nid : G[cid].nbrs[lyr]) {
+                if (vis[nid] || !G.count(nid)) continue;
+                vis[nid] = true;
+                float nd = dist(q, G[nid].item.emb);
+                if ((int)found.size() < ef || nd < found.top().first) {
+                    cands.push({nd, nid});
+                    found.push({nd, nid});
+                    if ((int)found.size() > ef) found.pop();
+                }
+            }
+        }
+
+        std::vector<std::pair<float,int>> res;
+        while (!found.empty()) { res.push_back(found.top()); found.pop(); }
+        std::sort(res.begin(), res.end());
+        return res;
+    }
+
+    std::vector<int> selectNbrs(std::vector<std::pair<float,int>>& cands, int maxM) {
