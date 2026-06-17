@@ -363,3 +363,76 @@ public:
         std::vector<VectorItem> rem;
         for (auto& [i, v] : store) rem.push_back(v);
         kdt.rebuild(rem);
+        return true;
+    }
+
+    struct Hit { int id; std::string meta, cat; std::vector<float> emb; float dist; };
+    struct SearchOut { std::vector<Hit> hits; long long us; std::string algo, metric; };
+
+    SearchOut search(const std::vector<float>& q, int k,
+                     const std::string& metric, const std::string& algo)
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        auto dfn = getDistFn(metric);
+        auto t0  = std::chrono::high_resolution_clock::now();
+
+        std::vector<std::pair<float,int>> raw;
+        if      (algo == "bruteforce") raw = bf.knn(q, k, dfn);
+        else if (algo == "kdtree")     raw = kdt.knn(q, k, dfn);
+        else                           raw = hnsw.knn(q, k, 50, dfn);
+
+        long long us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now() - t0).count();
+
+        SearchOut out; out.us = us; out.algo = algo; out.metric = metric;
+        for (auto& [d, id] : raw)
+            if (store.count(id))
+                out.hits.push_back({id, store[id].metadata, store[id].category, store[id].emb, d});
+        return out;
+    }
+
+    struct BenchOut { long long bfUs, kdUs, hnswUs; int n; };
+
+    BenchOut benchmark(const std::vector<float>& q, int k, const std::string& metric) {
+        std::lock_guard<std::mutex> lk(mu);
+        auto dfn  = getDistFn(metric);
+        auto time = [&](auto fn) -> long long {
+            auto t = std::chrono::high_resolution_clock::now();
+            fn();
+            return std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now() - t).count();
+        };
+        return {
+            time([&]{ bf.knn(q, k, dfn); }),
+            time([&]{ kdt.knn(q, k, dfn); }),
+            time([&]{ hnsw.knn(q, k, 50, dfn); }),
+            (int)store.size()
+        };
+    }
+
+    std::vector<VectorItem> all() {
+        std::lock_guard<std::mutex> lk(mu);
+        std::vector<VectorItem> r;
+        for (auto& [id, v] : store) r.push_back(v);
+        return r;
+    }
+
+    HNSW::GraphInfo hnswInfo() {
+        std::lock_guard<std::mutex> lk(mu);
+        return hnsw.getInfo();
+    }
+
+    size_t size() {
+        std::lock_guard<std::mutex> lk(mu);
+        return store.size();
+    }
+};
+
+// =====================================================================
+//  JSON HELPERS
+// =====================================================================
+
+std::string jS(const std::string& s) {
+    std::string o = "\"";
+    for (char c : s) {
+        if      (c == '"')  o += "\\\"";
