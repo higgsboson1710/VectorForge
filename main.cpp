@@ -290,3 +290,76 @@ public:
             for (auto& layer : nd.nbrs)
                 layer.erase(std::remove(layer.begin(), layer.end(), id), layer.end());
         if (entryPt == id) {
+            entryPt = -1;
+            for (auto& [nid, nd] : G) if (nid != id) { entryPt = nid; break; }
+        }
+        G.erase(id);
+    }
+
+    struct GraphInfo {
+        int topLayer, nodeCount;
+        std::vector<int> nodesPerLayer, edgesPerLayer;
+        struct NV { int id; std::string metadata, category; int maxLyr; };
+        struct EV { int src, dst, lyr; };
+        std::vector<NV> nodes;
+        std::vector<EV> edges;
+    };
+
+    GraphInfo getInfo() {
+        GraphInfo gi;
+        gi.topLayer  = topLayer;
+        gi.nodeCount = (int)G.size();
+        int maxL = std::max(topLayer + 1, 1);
+        gi.nodesPerLayer.assign(maxL, 0);
+        gi.edgesPerLayer.assign(maxL, 0);
+        for (auto& [id, nd] : G) {
+            gi.nodes.push_back({id, nd.item.metadata, nd.item.category, nd.maxLyr});
+            for (int lc = 0; lc <= nd.maxLyr && lc < maxL; lc++) {
+                gi.nodesPerLayer[lc]++;
+                if (lc < (int)nd.nbrs.size())
+                    for (int nid : nd.nbrs[lc])
+                        if (id < nid) {
+                            gi.edgesPerLayer[lc]++;
+                            gi.edges.push_back({id, nid, lc});
+                        }
+            }
+        }
+        return gi;
+    }
+
+    size_t size() const { return G.size(); }
+};
+
+// =====================================================================
+//  VECTOR DATABASE  (demo 16D index)
+// =====================================================================
+
+class VectorDB {
+    std::unordered_map<int, VectorItem> store;
+    BruteForce bf;
+    KDTree     kdt;
+    HNSW       hnsw;
+    std::mutex mu;
+    int nextId = 1;
+
+public:
+    const int dims;
+    explicit VectorDB(int d) : kdt(d), hnsw(16, 200), dims(d) {}
+
+    int insert(const std::string& meta, const std::string& cat,
+               const std::vector<float>& emb, DistFn dist)
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        VectorItem v{nextId++, meta, cat, emb};
+        store[v.id] = v;
+        bf.insert(v); kdt.insert(v); hnsw.insert(v, dist);
+        return v.id;
+    }
+
+    bool remove(int id) {
+        std::lock_guard<std::mutex> lk(mu);
+        if (!store.count(id)) return false;
+        store.erase(id); bf.remove(id); hnsw.remove(id);
+        std::vector<VectorItem> rem;
+        for (auto& [i, v] : store) rem.push_back(v);
+        kdt.rebuild(rem);
