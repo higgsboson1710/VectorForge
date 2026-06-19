@@ -509,3 +509,76 @@ bool parseBody(const std::string& b, std::string& meta,
         size_t p = b.find('"' + key + '"');
         if (p == std::string::npos) return {};
         p = b.find('[', p);
+        if (p == std::string::npos) return {};
+        size_t e = b.find(']', p);
+        if (e == std::string::npos) return {};
+        return parseVec(b.substr(p + 1, e - p - 1));
+    };
+    emb = extractArr("embedding");
+    return !meta.empty() && !emb.empty();
+}
+
+void cors(httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin",  "*");
+    res.set_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type");
+}
+
+// =====================================================================
+//  TEXT CHUNKER
+// =====================================================================
+
+std::vector<std::string> chunkText(const std::string& text,
+                                   int chunkWords = 250, int overlapWords = 30)
+{
+    std::istringstream ss(text);
+    std::vector<std::string> words;
+    std::string w;
+    while (ss >> w) words.push_back(w);
+
+    if (words.empty()) return {};
+    if ((int)words.size() <= chunkWords) return {text};
+
+    std::vector<std::string> chunks;
+    int step = chunkWords - overlapWords;
+    for (int i = 0; i < (int)words.size(); i += step) {
+        int end = std::min(i + chunkWords, (int)words.size());
+        std::string chunk;
+        for (int j = i; j < end; j++) { if (j > i) chunk += ' '; chunk += words[j]; }
+        chunks.push_back(chunk);
+        if (end == (int)words.size()) break;
+    }
+    return chunks;
+}
+
+// =====================================================================
+//  OLLAMA CLIENT  — wraps local Ollama REST API
+//  Install:  https://ollama.com
+//  Models:   ollama pull nomic-embed-text
+//            ollama pull llama3.2
+// =====================================================================
+
+class OllamaClient {
+    std::string host;
+    int         port;
+
+    // Escape a string for embedding inside a JSON string literal
+    std::string esc(const std::string& s) {
+        std::string o;
+        for (char c : s) {
+            if      (c == '"')  o += "\\\"";
+            else if (c == '\\') o += "\\\\";
+            else if (c == '\n') o += "\\n";
+            else if (c == '\r') o += "\\r";
+            else if (c == '\t') o += "\\t";
+            else                o += c;
+        }
+        return o;
+    }
+
+    // Parse {"embedding":[...]} from Ollama /api/embeddings response
+    std::vector<float> parseEmbedding(const std::string& body) {
+        size_t p = body.find("\"embedding\"");
+        if (p == std::string::npos) return {};
+        p = body.find('[', p);
+        if (p == std::string::npos) return {};
