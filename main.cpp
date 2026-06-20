@@ -655,3 +655,76 @@ class DocumentDB {
     std::mutex mu;
     int nextId = 1;
     int dims   = 0;      // determined from first inserted embedding
+
+public:
+    DocumentDB() : hnsw(16, 200) {}
+
+    // Insert one chunk with its pre-computed embedding
+    int insert(const std::string& title, const std::string& text,
+               const std::vector<float>& emb)
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        if (dims == 0) dims = (int)emb.size();
+        DocItem item{nextId++, title, text, emb};
+        store[item.id] = item;
+        VectorItem vi{item.id, title, "doc", emb};
+        hnsw.insert(vi, cosine);
+        bf.insert(vi);
+        return item.id;
+    }
+
+    // Semantic search — returns top-k most similar chunks
+    std::vector<std::pair<float, DocItem>> search(
+        const std::vector<float>& q, int k, float max_dist = 0.7f)
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        if (store.empty()) return {};
+        auto raw = (store.size() < 10)
+                   ? bf.knn(q, k, cosine)
+                   : hnsw.knn(q, k, 50, cosine);
+        std::vector<std::pair<float, DocItem>> out;
+        for (auto& [d, id] : raw)
+            if (store.count(id) && d <= max_dist) out.push_back({d, store[id]});
+        return out;
+    }
+
+    bool remove(int id) {
+        std::lock_guard<std::mutex> lk(mu);
+        if (!store.count(id)) return false;
+        store.erase(id); hnsw.remove(id); bf.remove(id);
+        return true;
+    }
+
+    std::vector<DocItem> all() {
+        std::lock_guard<std::mutex> lk(mu);
+        std::vector<DocItem> r;
+        for (auto& [id, v] : store) r.push_back(v);
+        return r;
+    }
+
+    size_t size() {
+        std::lock_guard<std::mutex> lk(mu);
+        return store.size();
+    }
+
+    int getDims() { return dims; }
+};
+
+// =====================================================================
+//  DEMO DATA  (16D categorical vectors)
+// =====================================================================
+
+void loadDemo(VectorDB& db) {
+    auto dist = getDistFn("cosine");
+    // Dims 0-3: CS | Dims 4-7: Math | Dims 8-11: Food | Dims 12-15: Sports
+    db.insert("Linked List: nodes connected by pointers", "cs",
+        {0.90f,0.85f,0.72f,0.68f,0.12f,0.08f,0.15f,0.10f,0.05f,0.08f,0.06f,0.09f,0.07f,0.11f,0.08f,0.06f}, dist);
+    db.insert("Binary Search Tree: O(log n) search and insert", "cs",
+        {0.88f,0.82f,0.78f,0.74f,0.15f,0.10f,0.08f,0.12f,0.06f,0.07f,0.08f,0.05f,0.09f,0.06f,0.07f,0.10f}, dist);
+    db.insert("Dynamic Programming: memoization overlapping subproblems", "cs",
+        {0.82f,0.76f,0.88f,0.80f,0.20f,0.18f,0.12f,0.09f,0.07f,0.06f,0.08f,0.07f,0.08f,0.09f,0.06f,0.07f}, dist);
+    db.insert("Graph BFS and DFS: breadth and depth first traversal", "cs",
+        {0.85f,0.80f,0.75f,0.82f,0.18f,0.14f,0.10f,0.08f,0.06f,0.09f,0.07f,0.06f,0.10f,0.08f,0.09f,0.07f}, dist);
+    db.insert("Hash Table: O(1) lookup with collision chaining", "cs",
+        {0.87f,0.78f,0.70f,0.76f,0.13f,0.11f,0.09f,0.14f,0.08f,0.07f,0.06f,0.08f,0.07f,0.10f,0.08f,0.09f}, dist);
+    db.insert("Calculus: derivatives integrals and limits", "math",
