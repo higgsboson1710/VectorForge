@@ -728,3 +728,76 @@ void loadDemo(VectorDB& db) {
     db.insert("Hash Table: O(1) lookup with collision chaining", "cs",
         {0.87f,0.78f,0.70f,0.76f,0.13f,0.11f,0.09f,0.14f,0.08f,0.07f,0.06f,0.08f,0.07f,0.10f,0.08f,0.09f}, dist);
     db.insert("Calculus: derivatives integrals and limits", "math",
+        {0.12f,0.15f,0.18f,0.10f,0.91f,0.86f,0.78f,0.72f,0.08f,0.06f,0.07f,0.09f,0.07f,0.08f,0.06f,0.10f}, dist);
+    db.insert("Linear Algebra: matrices eigenvalues eigenvectors", "math",
+        {0.20f,0.18f,0.15f,0.12f,0.88f,0.90f,0.82f,0.76f,0.09f,0.07f,0.08f,0.06f,0.10f,0.07f,0.08f,0.09f}, dist);
+    db.insert("Probability: distributions random variables Bayes theorem", "math",
+        {0.15f,0.12f,0.20f,0.18f,0.84f,0.80f,0.88f,0.82f,0.07f,0.08f,0.06f,0.10f,0.09f,0.06f,0.09f,0.08f}, dist);
+    db.insert("Number Theory: primes modular arithmetic RSA cryptography", "math",
+        {0.22f,0.16f,0.14f,0.20f,0.80f,0.85f,0.76f,0.90f,0.08f,0.09f,0.07f,0.06f,0.08f,0.10f,0.07f,0.06f}, dist);
+    db.insert("Combinatorics: permutations combinations generating functions", "math",
+        {0.18f,0.20f,0.16f,0.14f,0.86f,0.78f,0.84f,0.80f,0.06f,0.07f,0.09f,0.08f,0.06f,0.09f,0.10f,0.07f}, dist);
+    db.insert("Neapolitan Pizza: wood-fired dough San Marzano tomatoes", "food",
+        {0.08f,0.06f,0.09f,0.07f,0.07f,0.08f,0.06f,0.09f,0.90f,0.86f,0.78f,0.72f,0.08f,0.06f,0.09f,0.07f}, dist);
+    db.insert("Sushi: vinegared rice raw fish and nori rolls", "food",
+        {0.06f,0.08f,0.07f,0.09f,0.09f,0.06f,0.08f,0.07f,0.86f,0.90f,0.82f,0.76f,0.07f,0.09f,0.06f,0.08f}, dist);
+    db.insert("Ramen: noodle soup with chashu pork and soft-boiled eggs", "food",
+        {0.09f,0.07f,0.06f,0.08f,0.08f,0.09f,0.07f,0.06f,0.82f,0.78f,0.90f,0.84f,0.09f,0.07f,0.08f,0.06f}, dist);
+    db.insert("Tacos: corn tortillas with carnitas salsa and cilantro", "food",
+        {0.07f,0.09f,0.08f,0.06f,0.06f,0.07f,0.09f,0.08f,0.78f,0.82f,0.86f,0.90f,0.06f,0.08f,0.07f,0.09f}, dist);
+    db.insert("Croissant: laminated pastry with buttery flaky layers", "food",
+        {0.06f,0.07f,0.10f,0.09f,0.10f,0.06f,0.07f,0.10f,0.85f,0.80f,0.76f,0.82f,0.09f,0.07f,0.10f,0.06f}, dist);
+    db.insert("Basketball: fast-paced shooting dribbling slam dunks", "sports",
+        {0.09f,0.07f,0.08f,0.10f,0.08f,0.09f,0.07f,0.06f,0.08f,0.07f,0.09f,0.06f,0.91f,0.85f,0.78f,0.72f}, dist);
+    db.insert("Football: tackles touchdowns field goals and strategy", "sports",
+        {0.07f,0.09f,0.06f,0.08f,0.09f,0.07f,0.10f,0.08f,0.07f,0.09f,0.08f,0.07f,0.87f,0.89f,0.82f,0.76f}, dist);
+    db.insert("Tennis: racket volleys groundstrokes and Wimbledon serves", "sports",
+        {0.08f,0.06f,0.09f,0.07f,0.07f,0.08f,0.06f,0.09f,0.09f,0.06f,0.07f,0.08f,0.83f,0.80f,0.88f,0.82f}, dist);
+    db.insert("Chess: openings endgames tactics strategic board game", "sports",
+        {0.25f,0.20f,0.22f,0.18f,0.22f,0.18f,0.20f,0.15f,0.06f,0.08f,0.07f,0.09f,0.80f,0.84f,0.78f,0.90f}, dist);
+    db.insert("Swimming: butterfly freestyle backstroke Olympic competition", "sports",
+        {0.06f,0.08f,0.07f,0.09f,0.08f,0.06f,0.09f,0.07f,0.10f,0.08f,0.06f,0.07f,0.85f,0.82f,0.86f,0.80f}, dist);
+}
+
+// =====================================================================
+//  HTTP SERVER
+// =====================================================================
+
+int main() {
+    VectorDB   db(DIMS);
+    DocumentDB docDB;
+    OllamaClient ollama;
+
+    loadDemo(db);
+
+    // Check Ollama at startup (non-fatal)
+    bool ollamaUp = ollama.isAvailable();
+    std::cout << "=== VectorDB Engine ===" << std::endl;
+    std::cout << "http://localhost:8080" << std::endl;
+    std::cout << db.size() << " demo vectors | " << DIMS << " dims | HNSW+KD-Tree+BruteForce" << std::endl;
+    std::cout << "Ollama: " << (ollamaUp ? "ONLINE" : "OFFLINE (install from ollama.com)") << std::endl;
+    if (ollamaUp) std::cout << "  embed model: " << ollama.embedModel
+                            << "  gen model: "   << ollama.genModel << std::endl;
+
+    httplib::Server svr;
+
+    // CORS preflight
+    svr.Options(".*", [](const httplib::Request&, httplib::Response& res) {
+        cors(res); res.status = 204;
+    });
+
+    // ── DEMO VECTOR ENDPOINTS ─────────────────────────────────────────
+
+    svr.Get("/search", [&](const httplib::Request& req, httplib::Response& res) {
+        cors(res);
+        auto q = parseVec(req.get_param_value("v"));
+        if ((int)q.size() != DIMS) {
+            res.set_content("{\"error\":\"need " + std::to_string(DIMS) + "D vector\"}",
+                            "application/json"); return;
+        }
+        int k = 5;
+        try { k = std::stoi(req.get_param_value("k")); } catch (...) {}
+        auto metric = req.get_param_value("metric"); if (metric.empty()) metric = "cosine";
+        auto algo   = req.get_param_value("algo");   if (algo.empty())   algo   = "hnsw";
+
+        auto out = db.search(q, k, metric, algo);
