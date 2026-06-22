@@ -874,3 +874,76 @@ int main() {
         std::ostringstream ss;
         ss << "{\"topLayer\":" << gi.topLayer << ",\"nodeCount\":" << gi.nodeCount
            << ",\"nodesPerLayer\":[";
+        for (size_t i = 0; i < gi.nodesPerLayer.size(); i++) {
+            if (i) ss << ','; ss << gi.nodesPerLayer[i];
+        }
+        ss << "],\"edgesPerLayer\":[";
+        for (size_t i = 0; i < gi.edgesPerLayer.size(); i++) {
+            if (i) ss << ','; ss << gi.edgesPerLayer[i];
+        }
+        ss << "],\"nodes\":[";
+        for (size_t i = 0; i < gi.nodes.size(); i++) {
+            if (i) ss << ',';
+            auto& n = gi.nodes[i];
+            ss << "{\"id\":" << n.id << ",\"metadata\":" << jS(n.metadata)
+               << ",\"category\":" << jS(n.category) << ",\"maxLyr\":" << n.maxLyr << '}';
+        }
+        ss << "],\"edges\":[";
+        for (size_t i = 0; i < gi.edges.size(); i++) {
+            if (i) ss << ',';
+            auto& e = gi.edges[i];
+            ss << "{\"src\":" << e.src << ",\"dst\":" << e.dst << ",\"lyr\":" << e.lyr << '}';
+        }
+        ss << "]}";
+        res.set_content(ss.str(), "application/json");
+    });
+
+    // ── DOCUMENT + RAG ENDPOINTS ──────────────────────────────────────
+
+    // POST /doc/insert  {"title":"...","text":"..."}
+    // Chunks the text, embeds each chunk via Ollama, stores in DocumentDB
+    svr.Post("/doc/insert", [&](const httplib::Request& req, httplib::Response& res) {
+        cors(res);
+        auto title = extractStr(req.body, "title");
+        auto text  = extractStr(req.body, "text");
+        if (title.empty() || text.empty()) {
+            res.set_content("{\"error\":\"need title and text\"}", "application/json"); return;
+        }
+
+        auto chunks = chunkText(text, 250, 30);
+        std::vector<int> ids;
+
+        for (int i = 0; i < (int)chunks.size(); i++) {
+            auto emb = ollama.embed(chunks[i]);
+            if (emb.empty()) {
+                res.set_content(
+                    "{\"error\":\"Ollama unavailable. "
+                    "Install from https://ollama.com then run: "
+                    "ollama pull nomic-embed-text && ollama pull llama3.2\"}",
+                    "application/json");
+                return;
+            }
+            std::string chunkTitle = (chunks.size() > 1)
+                ? title + " [" + std::to_string(i+1) + "/" + std::to_string(chunks.size()) + "]"
+                : title;
+            ids.push_back(docDB.insert(chunkTitle, chunks[i], emb));
+        }
+
+        std::ostringstream ss;
+        ss << "{\"ids\":[";
+        for (size_t i = 0; i < ids.size(); i++) { if (i) ss << ','; ss << ids[i]; }
+        ss << "],\"chunks\":" << chunks.size()
+           << ",\"dims\":"    << docDB.getDims() << '}';
+        res.set_content(ss.str(), "application/json");
+    });
+
+    // DELETE /doc/delete/123
+    svr.Delete(R"(/doc/delete/(\d+))", [&](const httplib::Request& req, httplib::Response& res) {
+        cors(res);
+        int id  = std::stoi(req.matches[1]);
+        bool ok = docDB.remove(id);
+        res.set_content("{\"ok\":" + std::string(ok ? "true" : "false") + "}",
+                        "application/json");
+    });
+
+    // GET /doc/list
