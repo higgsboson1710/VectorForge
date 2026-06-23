@@ -947,3 +947,76 @@ int main() {
     });
 
     // GET /doc/list
+    svr.Get("/doc/list", [&](const httplib::Request&, httplib::Response& res) {
+        cors(res);
+        auto docs = docDB.all();
+        std::ostringstream ss; ss << '[';
+        for (size_t i = 0; i < docs.size(); i++) {
+            if (i) ss << ',';
+            // Truncate text preview to 120 chars
+            std::string preview = docs[i].text.substr(0, 120);
+            if (docs[i].text.size() > 120) preview += "…";
+            ss << "{\"id\":" << docs[i].id
+               << ",\"title\":" << jS(docs[i].title)
+               << ",\"preview\":" << jS(preview)
+               << ",\"words\":"  << (int)std::count(docs[i].text.begin(), docs[i].text.end(), ' ') + 1
+               << '}';
+        }
+        ss << ']';
+        res.set_content(ss.str(), "application/json");
+    });
+
+    // POST /doc/search {"question":"...","k":3}
+    // Fast retrieval for the UI visualizer
+    svr.Post("/doc/search", [&](const httplib::Request& req, httplib::Response& res) {
+        cors(res);
+        auto question = extractStr(req.body, "question");
+        int  k        = extractInt(req.body, "k", 3);
+        if (question.empty()) {
+            res.set_content("{\"error\":\"need question\"}", "application/json"); return;
+        }
+
+        auto qEmb = ollama.embed(question);
+        if (qEmb.empty()) {
+            res.set_content("{\"error\":\"Ollama unavailable\"}", "application/json"); return;
+        }
+
+        auto hits = docDB.search(qEmb, k);
+
+        std::ostringstream ss;
+        ss << "{\"contexts\":[";
+        for (size_t i = 0; i < hits.size(); i++) {
+            if (i) ss << ',';
+            ss << "{\"id\":"       << hits[i].second.id
+               << ",\"title\":"    << jS(hits[i].second.title)
+               << ",\"distance\":" << std::fixed << std::setprecision(4) << hits[i].first << '}';
+        }
+        ss << "]}";
+        res.set_content(ss.str(), "application/json");
+    });
+
+    // POST /doc/ask  {"question":"...","k":3}
+    // Full RAG pipeline: embed → retrieve → generate
+    svr.Post("/doc/ask", [&](const httplib::Request& req, httplib::Response& res) {
+        cors(res);
+        auto question = extractStr(req.body, "question");
+        int  k        = extractInt(req.body, "k", 3);
+        if (question.empty()) {
+            res.set_content("{\"error\":\"need question\"}", "application/json"); return;
+        }
+
+        // Step 1: embed the question
+        auto qEmb = ollama.embed(question);
+        if (qEmb.empty()) {
+            res.set_content("{\"error\":\"Ollama unavailable\"}", "application/json"); return;
+        }
+
+        // Step 2: retrieve top-k relevant chunks
+        auto hits = docDB.search(qEmb, k);
+
+        // Step 3: build prompt
+        std::ostringstream ctx;
+        for (int i = 0; i < (int)hits.size(); i++) {
+            ctx << "[" << (i+1) << "] " << hits[i].second.title << ":\n"
+                << hits[i].second.text << "\n\n";
+        }
