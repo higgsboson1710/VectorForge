@@ -1020,3 +1020,70 @@ int main() {
             ctx << "[" << (i+1) << "] " << hits[i].second.title << ":\n"
                 << hits[i].second.text << "\n\n";
         }
+        std::string prompt =
+            "You are a helpful assistant. Answer the user's question directly. "
+            "Use the provided context if it contains relevant information. "
+            "If it doesn't, just use your own general knowledge. "
+            "IMPORTANT: Do NOT mention the 'context', 'provided text', or say things like 'the context doesn't mention'. "
+            "Just answer the question naturally.\n\n"
+            "Context:\n" + ctx.str() +
+            "Question: " + question + "\n\n"
+            "Answer:";
+
+        // Step 4: generate answer
+        auto answer = ollama.generate(prompt);
+
+        // Step 5: return everything
+        std::ostringstream ss;
+        ss << "{\"answer\":" << jS(answer)
+           << ",\"model\":"  << jS(ollama.genModel)
+           << ",\"contexts\":[";
+        for (size_t i = 0; i < hits.size(); i++) {
+            if (i) ss << ',';
+            ss << "{\"id\":"       << hits[i].second.id
+               << ",\"title\":"    << jS(hits[i].second.title)
+               << ",\"text\":"     << jS(hits[i].second.text)
+               << ",\"distance\":" << std::fixed << std::setprecision(4) << hits[i].first << '}';
+        }
+        ss << "],\"docCount\":" << docDB.size() << '}';
+        res.set_content(ss.str(), "application/json");
+    });
+
+    // GET /status
+    svr.Get("/status", [&](const httplib::Request&, httplib::Response& res) {
+        cors(res);
+        bool up = ollama.isAvailable();
+        std::ostringstream ss;
+        ss << "{\"ollamaAvailable\":"  << (up ? "true" : "false")
+           << ",\"embedModel\":"       << jS(ollama.embedModel)
+           << ",\"genModel\":"         << jS(ollama.genModel)
+           << ",\"docCount\":"         << docDB.size()
+           << ",\"docDims\":"          << docDB.getDims()
+           << ",\"demoDims\":"         << DIMS
+           << ",\"demoCount\":"        << db.size() << '}';
+        res.set_content(ss.str(), "application/json");
+    });
+
+    svr.Get("/stats", [&](const httplib::Request&, httplib::Response& res) {
+        cors(res);
+        std::ostringstream ss;
+        ss << "{\"count\":"      << db.size()
+           << ",\"dims\":"       << DIMS
+           << ",\"algorithms\":[\"bruteforce\",\"kdtree\",\"hnsw\"]"
+           << ",\"metrics\":[\"euclidean\",\"cosine\",\"manhattan\"]}";
+        res.set_content(ss.str(), "application/json");
+    });
+
+    // Serve index.html
+    svr.Get("/", [](const httplib::Request&, httplib::Response& res) {
+        std::ifstream f("index.html");
+        if (!f.is_open()) { res.status = 404; return; }
+        res.set_content(
+            std::string(std::istreambuf_iterator<char>(f),
+                        std::istreambuf_iterator<char>()),
+            "text/html");
+    });
+
+    svr.listen("0.0.0.0", 8080);
+    return 0;
+}
