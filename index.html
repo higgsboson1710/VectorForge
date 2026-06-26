@@ -256,3 +256,89 @@ button {
       <div>
         <div class="sec">Query Embedding (16D)</div>
         <canvas id="vecCvs" height="76"></canvas>
+      </div>
+      <div id="benchSec" style="display:none">
+        <div class="sec">Algorithm Comparison</div>
+        <div class="bench" id="benchBars"></div>
+      </div>
+      <div>
+        <div class="sec">HNSW Graph Layers</div>
+        <div class="layers" id="layers">
+          <div style="color:var(--muted);font-size:11px">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: DOCUMENTS -->
+    <div class="tab-content" id="tab-docs">
+      <div>
+        <div class="sec">Ollama Status</div>
+        <div class="ollama-status" id="ollamaStatus">Checking…</div>
+      </div>
+      <div>
+        <div class="sec">Insert Document</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input type="text" id="docTitle" placeholder="Document title / topic…" />
+          <textarea id="docText" placeholder="Paste your notes, textbook excerpt, lecture content…&#10;&#10;Long text is automatically split into overlapping chunks and each chunk gets its own real embedding via Ollama's nomic-embed-text model."></textarea>
+          <button class="btn-g" id="insertDocBtn" onclick="insertDocument()">⚡ EMBED &amp; INSERT</button>
+          <div id="insertStatus" style="font-size:11px;color:var(--muted)"></div>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Stored Documents (<span id="docCountLabel">0</span>)</div>
+        <div class="doc-list" id="docList">
+          <div style="color:var(--muted);font-size:11px">No documents yet. Insert some above.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: ASK AI (RAG) -->
+    <div class="tab-content" id="tab-rag">
+      <div>
+        <div class="sec">Ask a Question</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <textarea id="ragQuestion" rows="3" placeholder="What is dynamic programming?&#10;Explain the main idea of HNSW.&#10;How does the recipe differ from…"></textarea>
+          <div style="display:flex;gap:6px">
+            <select id="ragK" style="width:auto;flex-shrink:0">
+              <option value="2">Top 2</option>
+              <option value="3" selected>Top 3</option>
+              <option value="5">Top 5</option>
+            </select>
+            <button class="btn-g" id="askBtn" onclick="askAI()" style="flex:1">🤖 ASK AI</button>
+          </div>
+          <div style="font-size:10px;color:var(--muted)">Uses your inserted documents as context. Answers come from the local LLM.</div>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Conversation</div>
+        <div class="chat-history" id="chatHistory">
+          <div style="color:var(--muted);font-size:11px">Ask a question about your inserted documents…</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end right-panel -->
+</div><!-- end layout -->
+
+<div id="tip"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ════════════════════════════════════════════════════════════
+const API  = 'http://localhost:8080';
+const DIMS = 16;
+const COL  = { cs:'#00d9ff', math:'#b388ff', food:'#ffb74d', sports:'#69f0ae', doc:'#a6e3a1', default:'#90a4ae' };
+const DIM_COL = ['#00d9ff','#00d9ff','#00d9ff','#00d9ff','#b388ff','#b388ff','#b388ff','#b388ff',
+                 '#ffb74d','#ffb74d','#ffb74d','#ffb74d','#69f0ae','#69f0ae','#69f0ae','#69f0ae'];
+
+// ════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════
+let allItems = [], pcaPoints = [], hitIds = new Set(), queryPt = null;
+let hoverItem = null, pulse = 0, selAlgo = 'hnsw', searchResults = [];
+
+// ════════════════════════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════════════════════════
+function switchTab(name) {
