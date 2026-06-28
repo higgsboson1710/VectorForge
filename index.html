@@ -600,3 +600,89 @@ async function runBenchmark() {
     ].map(({lbl,us,col})=>{
       const pct=Math.max((us/mx)*100,2),disp=us<1000?us+' μs':(us/1000).toFixed(2)+' ms';
       return `<div class="brow"><div class="blabel"><span style="color:${col}">${lbl}</span><span style="color:var(--muted)">${disp}</span></div><div class="btrack"><div class="bfill" style="width:${pct}%;background:${col}"></div></div></div>`;
+    }).join('');
+  } catch(_) {}
+}
+
+async function loadHNSW() {
+  try {
+    const r=await fetch(API+'/hnsw-info'), d=await r.json();
+    const maxN=d.nodesPerLayer[0]||1;
+    document.getElementById('layers').innerHTML=d.nodesPerLayer.map((cnt,lyr)=>{
+      const pct=Math.max((cnt/maxN)*100,2),edg=d.edgesPerLayer[lyr]||0;
+      return `<div class="lrow"><div class="lnum">L${lyr}</div><div class="ltrack"><div class="lfill" style="width:${pct}%"></div></div><div class="lcount">${cnt}n · ${edg}e</div></div>`;
+    }).join('')||'<div style="color:var(--muted);font-size:11px">Empty</div>';
+  } catch(_) {}
+}
+
+async function addVector() {
+  const meta=document.getElementById('addMeta').value.trim(),cat=document.getElementById('addCat').value;
+  if(!meta)return;
+  const emb=textToEmbedding(meta+' '+cat);
+  try {
+    await fetch(API+'/insert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({metadata:meta,category:cat,embedding:emb})});
+    document.getElementById('addMeta').value='';
+    await loadItems();loadHNSW();
+  } catch(_) {}
+}
+
+async function deleteItem(id) {
+  try {
+    await fetch(`${API}/delete/${id}`,{method:'DELETE'});
+    searchResults=searchResults.filter(r=>r.id!==id);hitIds.delete(id);
+    renderResults(searchResults);await loadItems();loadHNSW();
+  } catch(_) {}
+}
+
+// ════════════════════════════════════════════════════════════
+//  DOCUMENT MANAGEMENT
+// ════════════════════════════════════════════════════════════
+async function checkOllamaStatus() {
+  try {
+    const r=await fetch(API+'/status'), d=await r.json();
+    const badge=document.getElementById('ollamaBadge');
+    const box=document.getElementById('ollamaStatus');
+    if (d.ollamaAvailable) {
+      badge.className='badge ok'; badge.textContent='OLLAMA ✓';
+      box.className='ollama-status ok';
+      box.innerHTML=`<span style="color:var(--green)">● Online</span><br>`+
+        `Embed: <span style="color:var(--accent)">${d.embedModel}</span><br>`+
+        `Generate: <span style="color:var(--accent)">${d.genModel}</span><br>`+
+        `Dims: <span style="color:var(--muted)">${d.docDims||'(first insert sets this)'}</span><br>`+
+        `Documents: <span style="color:var(--text)">${d.docCount}</span>`;
+    } else {
+      badge.className='badge err'; badge.textContent='OLLAMA ✗';
+      box.className='ollama-status err';
+      box.innerHTML=`<span style="color:var(--red)">● Offline</span><br><br>`+
+        `To enable RAG features:<br>`+
+        `<span style="color:var(--muted)">1. Install from ollama.com<br>`+
+        `2. ollama pull nomic-embed-text<br>`+
+        `3. ollama pull llama3.2</span>`;
+    }
+  } catch(_) {}
+}
+
+async function insertDocument() {
+  const title=document.getElementById('docTitle').value.trim();
+  const text=document.getElementById('docText').value.trim();
+  const btn=document.getElementById('insertDocBtn');
+  const status=document.getElementById('insertStatus');
+  if(!title||!text){status.textContent='⚠ Need both a title and text.';return;}
+
+  btn.disabled=true; btn.textContent='Embedding…';
+  status.innerHTML='<span style="color:var(--muted)">Calling Ollama nomic-embed-text…</span>';
+
+  try {
+    const r=await fetch(API+'/doc/insert',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({title,text})
+    });
+    const d=await r.json();
+    if (d.error) {
+      status.innerHTML=`<span style="color:var(--red)">✗ ${d.error}</span>`;
+    } else {
+      status.innerHTML=`<span style="color:var(--green)">✓ Inserted ${d.chunks} chunk(s) · ${d.dims}D embeddings</span>`;
+      document.getElementById('docTitle').value='';
+      document.getElementById('docText').value='';
+
+          // Insert a 16D fake vector into the visualizer DB so it shows up on the map
