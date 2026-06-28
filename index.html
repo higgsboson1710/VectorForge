@@ -514,3 +514,89 @@ async function loadItems() {
       let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
       for (const p of pcaPoints){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);}
       const px=(x1-x0)*.18||.1,py=(y1-y0)*.18||.1;
+      bounds={minX:x0-px,maxX:x1+px,minY:y0-py,maxY:y1+py};
+    }
+    document.getElementById('statsLabel').textContent=allItems.length+' vectors · '+DIMS+' dims';
+  } catch(_) {}
+}
+
+// ════════════════════════════════════════════════════════════
+//  DEMO SEARCH
+// ════════════════════════════════════════════════════════════
+function setAlgo(el) {
+  document.querySelectorAll('.algo-btn').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on'); selAlgo=el.dataset.algo;
+}
+
+async function runSearch() {
+  const text=document.getElementById('qInput').value.trim(); if(!text)return;
+  const emb=textToEmbedding(text),k=parseInt(document.getElementById('kSlider').value);
+  const metric=document.getElementById('metric').value;
+  const url=`${API}/search?v=${emb.join(',')}&k=${k}&metric=${metric}&algo=${selAlgo}`;
+  try {
+    const r=await fetch(url), data=await r.json();
+    searchResults=data.results||[]; hitIds=new Set(searchResults.map(r=>r.id));
+    const us=data.latencyUs||0;
+    document.getElementById('latBig').textContent=us<1000?us+' μs':(us/1000).toFixed(2)+' ms';
+    document.getElementById('latSub').textContent=selAlgo.toUpperCase()+'  ·  '+metric+'  ·  k='+k;
+    if (searchResults.length>0){
+      let sx=0,sy=0,sw=0;
+      for (let i=0;i<Math.min(3,searchResults.length);i++){
+        const pt=pcaPoints.find(p=>p.item.id===searchResults[i].id);
+        if(pt){const w=1/(i+1);sx+=pt.x*w;sy+=pt.y*w;sw+=w;}
+      }
+      if(sw>0)queryPt={x:sx/sw+(Math.random()-.5)*.015,y:sy/sw+(Math.random()-.5)*.015};
+    }
+    renderResults(searchResults); drawVecChart(emb);
+  } catch(_){alert('Cannot reach server — is it running on :8080?');}
+}
+
+document.getElementById('qInput').addEventListener('keydown',e=>{if(e.key==='Enter')runSearch();});
+
+function renderResults(results) {
+  if (!results||!results.length){document.getElementById('results').innerHTML='<div style="color:var(--muted);font-size:11px">No results</div>';return;}
+  document.getElementById('results').innerHTML=results.map((r,i)=>{
+    const col=COL[r.category]||COL.default;
+    return `<div class="rcard" onmouseenter="hoverItem={id:${r.id}}" onmouseleave="hoverItem=null">
+      <div class="rrank">#${i+1} NEAREST</div>
+      <div class="rmeta">${r.metadata}</div>
+      <div class="rfoot">
+        <span class="rcat" style="background:${col}18;color:${col};border:1px solid ${col}44">${r.category.toUpperCase()}</span>
+        <span class="rdist">dist: ${r.distance.toFixed(5)}</span>
+        <button class="del" onclick="deleteItem(${r.id})">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function drawVecChart(emb) {
+  const vc=document.getElementById('vecCvs'),W=vc.parentElement.clientWidth;
+  vc.width=W;const vx=vc.getContext('2d');
+  vx.clearRect(0,0,W,76);vx.fillStyle='#07070f';vx.fillRect(0,0,W,76);
+  const bw=(W-4)/DIMS;
+  for (let i=0;i<DIMS;i++){
+    const h=emb[i]*58,x=2+i*bw,col=DIM_COL[i];
+    vx.shadowColor=col;vx.shadowBlur=5;vx.fillStyle=col+'aa';vx.fillRect(x+1,63-h,bw-2,h);
+  }
+  vx.shadowBlur=0;vx.font='8px monospace';vx.textAlign='center';
+  [['CS',0],['MATH',4],['FOOD',8],['SPORT',12]].forEach(([lbl,gi],i)=>{
+    vx.fillStyle=Object.values(COL)[i]+'77';vx.fillText(lbl,2+(gi+1.5)*bw,74);
+  });
+  vx.textAlign='left';
+}
+
+async function runBenchmark() {
+  const text=document.getElementById('qInput').value.trim()||'binary tree algorithm';
+  const emb=textToEmbedding(text),metric=document.getElementById('metric').value;
+  try {
+    const r=await fetch(`${API}/benchmark?v=${emb.join(',')}&k=5&metric=${metric}`);
+    const d=await r.json();
+    document.getElementById('benchSec').style.display='block';
+    const mx=Math.max(d.bruteforceUs,d.kdtreeUs,d.hnswUs,1);
+    document.getElementById('benchBars').innerHTML=[
+      {lbl:'Brute Force',us:d.bruteforceUs,col:'#f38ba8'},
+      {lbl:'KD-Tree',    us:d.kdtreeUs,    col:'#89dceb'},
+      {lbl:'HNSW',       us:d.hnswUs,      col:'#b388ff'},
+    ].map(({lbl,us,col})=>{
+      const pct=Math.max((us/mx)*100,2),disp=us<1000?us+' μs':(us/1000).toFixed(2)+' ms';
+      return `<div class="brow"><div class="blabel"><span style="color:${col}">${lbl}</span><span style="color:var(--muted)">${disp}</span></div><div class="btrack"><div class="bfill" style="width:${pct}%;background:${col}"></div></div></div>`;
