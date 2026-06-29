@@ -772,3 +772,87 @@ async function askAI() {
           hitIds.add(pt.item.id);
           const w = 1/(i+1); sx += pt.x*w; sy += pt.y*w; sw += w;
         }
+      });
+      if (sw > 0) queryPt = {x: sx/sw + (Math.random()-.5)*.015, y: sy/sw + (Math.random()-.5)*.015};
+    } else {
+      hitIds = new Set();
+      // Fallback: If no RAG docs match, visually move the star to the 16D semantic space anyway!
+      const emb16 = textToEmbedding(question);
+      fetch(`${API}/search?v=${emb16.join(',')}&k=3&metric=cosine&algo=hnsw`)
+        .then(res2=>res2.json())
+        .then(data2 => {
+          if (data2.results && data2.results.length>0) {
+            let sx=0,sy=0,sw=0;
+            for (let i=0;i<Math.min(3,data2.results.length);i++) {
+              const pt=pcaPoints.find(p=>p.item.id===data2.results[i].id);
+              if(pt){const w=1/(i+1);sx+=pt.x*w;sy+=pt.y*w;sw+=w;}
+            }
+            if(sw>0) queryPt={x:sx/sw+(Math.random()-.5)*.015,y:sy/sw+(Math.random()-.5)*.015};
+          }
+        }).catch(()=>{});
+    }
+  }).catch(()=>{});
+
+  try {
+    const r=await fetch(API+'/doc/ask',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question,k})
+    });
+    const d=await r.json();
+    thinkDiv.remove();
+
+    const aDiv=document.createElement('div'); aDiv.className='chat-a';
+
+    if (d.error) {
+      aDiv.innerHTML=`<div class="chat-a-label">ERROR</div><div class="chat-a-text" style="color:var(--red)">${d.error}</div>`;
+    } else {
+      // Build answer block with typewriter
+      aDiv.innerHTML=`<div class="chat-a-label">🤖 ${d.model||'llm'}</div>`+
+        `<div class="chat-a-text" id="typeTarget"></div>`+
+        `<div class="chat-ctx">`+
+          `<div class="chat-ctx-label">RETRIEVED CONTEXT (${d.contexts.length} chunks)</div>`+
+          d.contexts.map((c,i)=>`<span class="ctx-chip" onclick="toggleCtx(${i})">#${i+1} ${c.title} · ${c.distance.toFixed(3)}</span>`+
+            `<div class="ctx-expand" id="ctx-${i}">${c.text}</div>`).join('')+
+        `</div>`;
+      history.appendChild(aDiv);
+
+      // Typewriter effect
+      const target=aDiv.querySelector('#typeTarget');
+      target.classList.add('typing');
+      const full=d.answer; let i=0;
+      const timer=setInterval(()=>{
+        if(i>=full.length){clearInterval(timer);target.classList.remove('typing');return;}
+        const chunk=full.slice(i,i+3); target.textContent+=chunk; i+=3;
+        history.scrollTop=history.scrollHeight;
+      },18);
+    }
+
+    if (!d.error) { /* already appended above */ }
+    else history.appendChild(aDiv);
+
+  } catch(e) {
+    thinkDiv.remove();
+    const err=document.createElement('div');err.className='chat-a';
+    err.innerHTML='<div class="chat-a-label">ERROR</div><div class="chat-a-text" style="color:var(--red)">Server error — is the backend running?</div>';
+    history.appendChild(err);
+  }
+
+  document.getElementById('ragQuestion').value='';
+  btn.disabled=false; btn.textContent='🤖 ASK AI';
+  history.scrollTop=history.scrollHeight;
+}
+
+function toggleCtx(i) {
+  const el=document.getElementById('ctx-'+i);
+  el.style.display=el.style.display==='block'?'none':'block';
+}
+
+// ════════════════════════════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════════════════════════════
+resize(); drawFrame();
+loadItems().then(loadHNSW);
+checkOllamaStatus();
+</script>
+</body>
+</html>
