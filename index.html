@@ -686,3 +686,89 @@ async function insertDocument() {
       document.getElementById('docText').value='';
 
           // Insert a 16D fake vector into the visualizer DB so it shows up on the map
+          const emb16 = textToEmbedding(title + ' ' + text);
+          fetch(API+'/insert', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({metadata: title, category: 'doc', embedding: emb16})
+          }).then(() => { loadItems().then(loadHNSW); });
+
+      loadDocList(); checkOllamaStatus();
+    }
+  } catch(_) {
+    status.innerHTML='<span style="color:var(--red)">✗ Server error</span>';
+  }
+  btn.disabled=false; btn.textContent='⚡ EMBED & INSERT';
+}
+
+async function loadDocList() {
+  try {
+    const r=await fetch(API+'/doc/list'), docs=await r.json();
+    document.getElementById('docCountLabel').textContent=docs.length;
+    if (!docs.length) {
+      document.getElementById('docList').innerHTML='<div style="color:var(--muted);font-size:11px">No documents yet.</div>';
+      return;
+    }
+    document.getElementById('docList').innerHTML=docs.map(d=>`
+      <div class="dcard">
+        <div class="dcard-title">${d.title}</div>
+        <div class="dcard-preview">${d.preview}</div>
+        <div class="dcard-foot">
+          <span class="dcard-words">${d.words} words</span>
+          <button class="del" onclick="deleteDoc(${d.id})">✕</button>
+        </div>
+      </div>`).join('');
+  } catch(_) {}
+}
+
+async function deleteDoc(id) {
+  try {
+    await fetch(`${API}/doc/delete/${id}`,{method:'DELETE'});
+    loadDocList(); checkOllamaStatus();
+  } catch(_) {}
+}
+
+// ════════════════════════════════════════════════════════════
+//  RAG  — Ask AI
+// ════════════════════════════════════════════════════════════
+document.getElementById('ragQuestion').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&e.ctrlKey)askAI();
+});
+
+async function askAI() {
+  const question=document.getElementById('ragQuestion').value.trim();
+  if(!question)return;
+  const k=parseInt(document.getElementById('ragK').value);
+  const btn=document.getElementById('askBtn');
+  btn.disabled=true; btn.textContent='Thinking…';
+
+  const history=document.getElementById('chatHistory');
+  // Clear previous conversation
+  history.innerHTML='';
+
+  // Show question bubble
+  const qDiv=document.createElement('div'); qDiv.className='chat-q';
+  qDiv.textContent=question; history.appendChild(qDiv);
+
+  // Show thinking indicator
+  const thinkDiv=document.createElement('div'); thinkDiv.className='thinking';
+  thinkDiv.innerHTML='<div class="spinner"></div>Retrieving context & generating answer…';
+  history.appendChild(thinkDiv);
+  history.scrollTop=history.scrollHeight;
+
+  // Update the scatter plot visualizer in the background using the real 768D DB
+  fetch(API+'/doc/search', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({question, k})
+  })
+  .then(res=>res.json())
+  .then(data => {
+    if (data.contexts && data.contexts.length > 0) {
+      hitIds = new Set();
+      let sx=0, sy=0, sw=0;
+      data.contexts.forEach((ctx, i) => {
+        // Match the RAG chunk title back to the visualizer document metadata
+        const pt = pcaPoints.find(p => p.item.category === 'doc' && ctx.title.startsWith(p.item.metadata));
+        if (pt) {
+          hitIds.add(pt.item.id);
+          const w = 1/(i+1); sx += pt.x*w; sy += pt.y*w; sw += w;
+        }
